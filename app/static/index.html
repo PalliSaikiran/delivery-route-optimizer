@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery route optimizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --paper: #eef1f0;
+    --panel: #fbfcfb;
+    --ink: #16252b;
+    --muted: #5d6f76;
+    --rule: #d3dbd9;
+    --accent: #0d6b78;
+    --accent-ink: #ffffff;
+    --accent-soft: #dcecee;
+    --alert: #b93a0c;
+    --alert-soft: #f8e6de;
+    --bar-idle: #b9c5c8;
+    --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: var(--font); color: var(--ink); background: var(--paper); font-size: 14px; line-height: 1.45; }
+  .app { display: grid; grid-template-columns: 430px 1fr; height: 100%; }
+  .panel { background: var(--panel); border-right: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
+  .panel-scroll { overflow-y: auto; flex: 1; padding: 22px 22px 8px; }
+  #map { height: 100%; width: 100%; background: #dfe6e4; }
+  .map-fallback { padding: 24px; color: var(--muted); }
+
+  h1 { font-size: 21px; line-height: 1.2; margin: 0 0 6px; font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 10px; font-weight: 650; }
+  p { margin: 0 0 10px; }
+  .lede { color: var(--muted); max-width: 46ch; }
+  section { padding: 18px 0; border-top: 1px solid var(--rule); }
+  .panel-scroll > section:first-of-type { border-top: 0; padding-top: 6px; }
+
+  label { display: block; font-weight: 500; color: var(--muted); font-size: 12.5px; margin-bottom: 3px; }
+  input, select { font: inherit; color: var(--ink); background: #fff; border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; width: 100%; min-width: 0; }
+  input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible, .file-btn:focus-within {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .row { display: grid; gap: 10px; }
+  .row.two { grid-template-columns: 1fr 1fr; }
+  .row.three { grid-template-columns: 1fr 1fr 1fr; }
+  .row + .row { margin-top: 10px; }
+
+  button, .file-btn {
+    font: inherit; font-weight: 600; border-radius: 6px; padding: 8px 12px; cursor: pointer;
+    border: 1px solid var(--rule); background: #fff; color: var(--ink);
+  }
+  button:hover:not(:disabled), .file-btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.primary:hover:not(:disabled) { background: #0a5761; }
+  button:disabled { opacity: .6; cursor: progress; }
+  button.link { border: 0; background: none; color: var(--accent); padding: 2px 0; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+  .file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .file-btn { position: relative; display: inline-block; margin: 0; color: var(--ink); font-size: 14px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .status-ok { color: var(--accent); font-weight: 500; }
+  .error { background: var(--alert-soft); color: var(--alert); border-radius: 6px; padding: 8px 10px; margin: 10px 0; }
+  .error[hidden] { display: none; }
+
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 0 4px 4px 0; }
+  td { padding: 3px 4px 3px 0; vertical-align: middle; }
+  td input { padding: 4px 6px; }
+  .fleet td:first-child input { min-width: 84px; }
+  .icon-btn { border: 0; background: none; padding: 2px 6px; color: var(--muted); font-size: 16px; line-height: 1; }
+  .icon-btn:hover:not(:disabled) { color: var(--alert); }
+
+  .run-bar { border-top: 1px solid var(--rule); padding: 12px 22px 14px; background: var(--panel); }
+  .run-bar button { width: 100%; padding: 10px; font-size: 15px; }
+  .progress { height: 3px; background: var(--accent-soft); border-radius: 2px; margin-top: 8px; overflow: hidden; visibility: hidden; }
+  .progress.on { visibility: visible; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width linear; }
+
+  /* Results */
+  #results > section:first-of-type { border-top: 1px solid var(--rule); }
+  .headline { font-size: 17px; font-weight: 650; line-height: 1.3; margin-bottom: 4px; }
+  .caveat { color: var(--alert); font-size: 12.5px; margin: 6px 0 0; }
+  .metric { margin-top: 16px; }
+  .metric-name { font-weight: 600; margin-bottom: 4px; }
+  .bar-line { display: grid; grid-template-columns: 104px 1fr 84px; align-items: center; gap: 8px; margin-top: 3px; }
+  .bar-label { color: var(--muted); font-size: 12.5px; }
+  .bar-track { height: 12px; }
+  .bar { height: 100%; min-width: 2px; background: var(--bar-idle); border-radius: 2px; }
+  .bar.opt { background: var(--accent); }
+  .bar-val { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .compare th, .compare td { text-align: right; padding: 4px 0 4px 8px; border-top: 1px solid var(--rule); }
+  .compare th:first-child, .compare td:first-child { text-align: left; padding-left: 0; }
+  .compare thead th { border-top: 0; color: var(--ink); font-weight: 600; font-size: 12.5px; vertical-align: bottom; }
+  .compare td:first-child { color: var(--muted); }
+  .compare td.opt { color: var(--accent); font-weight: 650; }
+
+  details.route { border-top: 1px solid var(--rule); }
+  details.route:first-child { border-top: 0; }
+  details.route summary { cursor: pointer; padding: 9px 0; list-style: none; display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; }
+  details.route summary::-webkit-details-marker { display: none; }
+  .swatch { width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; }
+  .route-name { font-weight: 600; }
+  .route-meta { color: var(--muted); font-size: 12.5px; }
+  details.route[open] > summary .route-name::after { content: " (shown on map)"; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .stops { margin: 0 0 10px 24px; width: calc(100% - 24px); font-size: 12.5px; }
+  .stops td.late { color: var(--alert); font-weight: 600; }
+  .unassigned li { margin-bottom: 4px; }
+  ul.plain { margin: 0; padding-left: 18px; }
+
+  .stop-icon { color: #fff; font-weight: 700; font-size: 10.5px; line-height: 17px; text-align: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); font-variant-numeric: tabular-nums; }
+  .depot-icon { width: 22px; height: 22px; background: var(--ink); border: 3px solid #fff; box-shadow: 0 0 0 1.5px var(--ink); border-radius: 4px; }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 46vh auto; height: auto; min-height: 100%; }
+    .panel { order: 2; border-right: 0; border-top: 1px solid var(--rule); }
+    #map { order: 1; height: 46vh; }
+    .panel-scroll { overflow: visible; }
+    .run-bar { position: sticky; bottom: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .progress > div { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <div class="panel-scroll">
+      <header>
+        <h1>Delivery route optimizer</h1>
+        <p class="lede">Plans a day of deliveries around vehicle capacity, customer time windows and driver shifts, then compares the result with simple dispatch.</p>
+      </header>
+
+      <section>
+        <h2>Orders</h2>
+        <div class="row three">
+          <div><label for="city">City</label><select id="city"></select></div>
+          <div><label for="count">Orders</label><input id="count" type="number" min="5" max="300" value="100"></div>
+          <div><label for="seed">Random seed</label><input id="seed" type="number" value="42"></div>
+        </div>
+        <div class="actions">
+          <button id="gen" type="button">Generate sample orders</button>
+          <label class="file-btn">Upload orders CSV<input id="csv" type="file" accept=".csv,text/csv"></label>
+          <button id="dl-sample" type="button" class="link">Download orders as CSV</button>
+        </div>
+        <p class="note" id="orders-status" role="status"></p>
+        <p class="note">CSV columns: order_id, lat, lng, weight, volume, time_window_start, time_window_end, service_time. Times as HH:MM, weight in kg, volume in m³, service time in minutes.</p>
+      </section>
+
+      <section>
+        <h2>Depot and shift</h2>
+        <div class="row two">
+          <div><label for="depot-lat">Depot latitude</label><input id="depot-lat" type="number" step="any"></div>
+          <div><label for="depot-lng">Depot longitude</label><input id="depot-lng" type="number" step="any"></div>
+        </div>
+        <div class="row three">
+          <div><label for="shift-start">Shift starts</label><input id="shift-start" type="time" value="06:00"></div>
+          <div><label for="shift-end">Shift ends</label><input id="shift-end" type="time" value="20:00"></div>
+          <div><label for="max-route">Max route (min)</label><input id="max-route" type="number" min="30" max="1440" value="600"></div>
+        </div>
+        <div class="row two">
+          <div><label for="speed">Average speed (km/h)</label><input id="speed" type="number" min="6" max="120" value="28"></div>
+          <div><label for="detour">Road detour factor</label><input id="detour" type="number" min="1" max="3" step="0.05" value="1.3"></div>
+        </div>
+        <div class="actions"><button id="center-depot" type="button" class="link">Move depot to the centre of the orders</button></div>
+      </section>
+
+      <section>
+        <h2>Fleet</h2>
+        <table class="fleet" aria-label="Vehicle types">
+          <thead><tr><th>Type</th><th>Count</th><th>Max kg</th><th>Max m³</th><th>Cost per km</th><th>Fixed cost</th><th></th></tr></thead>
+          <tbody id="fleet-body"></tbody>
+        </table>
+        <div class="actions"><button id="add-type" type="button">Add vehicle type</button></div>
+        <p class="note">Costs are in ₹. Fixed cost is charged once for every vehicle that goes out.</p>
+      </section>
+
+      <section>
+        <h2>Solver</h2>
+        <div class="row two">
+          <div><label for="limit">Search time (seconds)</label><input id="limit" type="number" min="1" max="60" value="10"></div>
+          <div><label for="osrm">Distances</label>
+            <select id="osrm"><option value="false">Straight line with detour factor</option><option value="true">Real roads (OSRM, if the server has it)</option></select>
+          </div>
+        </div>
+        <p class="note">Longer search rarely changes small plans but can improve plans with more than 150 orders.</p>
+      </section>
+
+      <div id="error" class="error" role="alert" hidden></div>
+      <div id="results" aria-live="polite"></div>
+    </div>
+    <div class="run-bar">
+      <button id="run" class="primary" type="button">Plan routes</button>
+      <div class="progress" id="progress"><div></div></div>
+    </div>
+  </aside>
+  <main id="map" aria-label="Map of depot, orders and planned routes"></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const num = (n, d) => Number(n).toLocaleString("en-IN", { maximumFractionDigits: d || 0, minimumFractionDigits: d || 0 });
+  const rupee = (n) => "₹" + num(n);
+  const COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2", "#bcbd22", "#393b79", "#e6550d", "#637939"];
+
+  const state = { orders: [], depot: { lat: 12.9716, lng: 77.5946 }, result: null, groups: [], selected: null };
+
+  // ---------- Map ----------
+  let map = null, baseLayer = null, planLayer = null;
+  if (window.L) {
+    map = L.map("map").setView([12.9716, 77.5946], 11);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+    baseLayer = L.layerGroup().addTo(map);
+    planLayer = L.layerGroup().addTo(map);
+  } else {
+    $("#map").innerHTML = '<div class="map-fallback">The map library could not be loaded. Check your internet connection and reload. Planning still works.</div>';
+  }
+
+  function depotMarker() {
+    return L.marker([state.depot.lat, state.depot.lng], {
+      icon: L.divIcon({ className: "", html: '<div class="depot-icon"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+      zIndexOffset: 1000,
+    }).bindTooltip("Depot");
+  }
+
+  function drawOrders(fit) {
+    if (!map) return;
+    baseLayer.clearLayers();
+    planLayer.clearLayers();
+    state.groups = [];
+    depotMarker().addTo(baseLayer);
+    const pts = [[state.depot.lat, state.depot.lng]];
+    state.orders.forEach((o) => {
+      L.circleMarker([o.lat, o.lng], { radius: 4, color: "#4b5d64", weight: 1, fillColor: "#8aa0a8", fillOpacity: 0.85 })
+        .bindTooltip(`${esc(o.id)}: ${o.weight} kg, window ${esc(o.tw_start)} to ${esc(o.tw_end)}`)
+        .addTo(baseLayer);
+      pts.push([o.lat, o.lng]);
+    });
+    if (fit && pts.length > 1) map.fitBounds(pts, { padding: [40, 40] });
+  }
+
+  function drawPlan(result) {
+    if (!map) return;
+    baseLayer.clearLayers();
+    planLayer.clearLayers();
+    state.groups = [];
+    depotMarker().addTo(baseLayer);
+    const depot = [state.depot.lat, state.depot.lng];
+    const all = [depot];
+    result.optimized.routes.forEach((r, i) => {
+      const color = COLORS[i % COLORS.length];
+      const path = [depot].concat(r.stops.map((s) => [s.lat, s.lng]), [depot]);
+      const line = L.polyline(path, { color, weight: 3.5, opacity: 0.85 }).addTo(planLayer);
+      const markers = r.stops.map((s, k) => {
+        all.push([s.lat, s.lng]);
+        return L.marker([s.lat, s.lng], {
+          icon: L.divIcon({ className: "", html: `<div class="stop-icon" style="background:${color}">${k + 1}</div>`, iconSize: [20, 20], iconAnchor: [10, 10] }),
+        })
+          .bindPopup(`<strong>${esc(s.order_id)}</strong><br>${esc(r.vehicle)}, stop ${k + 1}<br>Arrive ${esc(s.arrival)}, window ${esc(s.window)}<br>${s.weight} kg`)
+          .addTo(planLayer);
+      });
+      state.groups.push({ line, markers });
+    });
+    result.optimized.unassigned.forEach((u) => {
+      all.push([u.lat, u.lng]);
+      L.circleMarker([u.lat, u.lng], { radius: 7, color: "#b93a0c", weight: 2.5, fillOpacity: 0 })
+        .bindTooltip(`${esc(u.order_id)} not delivered: ${esc(u.reason)}`)
+        .addTo(planLayer);
+    });
+    if (all.length > 1) map.fitBounds(all, { padding: [40, 40] });
+  }
+
+  function selectRoute(i) {
+    if (!map) return;
+    state.selected = i;
+    state.groups.forEach((g, j) => {
+      const on = j === i;
+      g.line.setStyle({ opacity: on ? 1 : 0.12, weight: on ? 5 : 3 });
+      g.markers.forEach((m) => m.setOpacity(on ? 1 : 0.2));
+    });
+    const g = state.groups[i];
+    if (g) map.fitBounds(g.line.getBounds(), { padding: [50, 50] });
+  }
+
+  function clearSelection() {
+    state.selected = null;
+    state.groups.forEach((g) => {
+      g.line.setStyle({ opacity: 0.85, weight: 3.5 });
+      g.markers.forEach((m) => m.setOpacity(1));
+    });
+  }
+
+  // ---------- Orders ----------
+  const setStatus = (msg, ok) => {
+    const el = $("#orders-status");
+    el.textContent = msg;
+    el.className = "note" + (ok ? " status-ok" : "");
+  };
+  const showError = (msg) => {
+    const el = $("#error");
+    el.hidden = !msg;
+    el.textContent = msg || "";
+  };
+
+  function applySample(data, city) {
+    state.orders = data.orders;
+    state.depot = { lat: data.depot.lat, lng: data.depot.lng };
+    $("#depot-lat").value = state.depot.lat;
+    $("#depot-lng").value = state.depot.lng;
+    renderFleet(data.vehicle_types);
+    state.result = null;
+    $("#results").innerHTML = "";
+    drawOrders(true);
+    setStatus(`${data.orders.length} sample orders around ${city}.`, true);
+  }
+
+  async function generate() {
+    showError("");
+    const n = Math.max(5, Math.min(300, parseInt($("#count").value, 10) || 100));
+    const city = $("#city").value;
+    const seed = parseInt($("#seed").value, 10) || 0;
+    try {
+      const res = await fetch(`/api/sample?n=${n}&city=${encodeURIComponent(city)}&seed=${seed}`);
+      if (!res.ok) throw new Error("The server could not generate sample orders.");
+      applySample(await res.json(), $("#city").selectedOptions[0].textContent);
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  // Minimal CSV parser: quoted fields, escaped quotes, CRLF.
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], cur = "", inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQ) {
+        if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; } else cur += c;
+      } else if (c === '"') inQ = true;
+      else if (c === ",") { row.push(cur); cur = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(cur); cur = "";
+        if (row.some((x) => x.trim() !== "")) rows.push(row);
+        row = [];
+      } else cur += c;
+    }
+    row.push(cur);
+    if (row.some((x) => x.trim() !== "")) rows.push(row);
+    return rows;
+  }
+
+  const ALIASES = {
+    id: ["order_id", "id", "order"],
+    lat: ["lat", "latitude"],
+    lng: ["lng", "lon", "long", "longitude"],
+    weight: ["weight", "weight_kg", "demand"],
+    volume: ["volume", "volume_m3"],
+    tw_start: ["time_window_start", "tw_start", "window_start", "ready_time"],
+    tw_end: ["time_window_end", "tw_end", "window_end", "due_time"],
+    service_min: ["service_time", "service_min", "service"],
+  };
+  const TIME_RE = /^\d{1,2}:\d{2}$/;
+  const pad = (t) => (/^\d:/.test(t) ? "0" + t : t);
+
+  function ordersFromCSV(text) {
+    const rows = parseCSV(text.replace(/^\uFEFF/, ""));
+    if (rows.length < 2) throw new Error("The CSV needs a header row and at least one order.");
+    const header = rows[0].map((h) => h.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+    const col = {};
+    for (const key of Object.keys(ALIASES)) col[key] = header.findIndex((h) => ALIASES[key].includes(h));
+    const missing = ["id", "lat", "lng", "weight", "tw_start", "tw_end"].filter((k) => col[k] < 0);
+    if (missing.length) throw new Error("The CSV is missing these columns: " + missing.map((k) => ALIASES[k][0]).join(", ") + ".");
+    const orders = [], problems = [];
+    rows.slice(1).forEach((r, idx) => {
+      const line = idx + 2;
+      const get = (k) => (col[k] >= 0 && r[col[k]] !== undefined ? r[col[k]].trim() : "");
+      const lat = parseFloat(get("lat")), lng = parseFloat(get("lng")), weight = parseFloat(get("weight"));
+      const vol = get("volume") === "" ? 0 : parseFloat(get("volume"));
+      const svc = get("service_min") === "" ? 10 : parseInt(get("service_min"), 10);
+      const t1 = pad(get("tw_start")), t2 = pad(get("tw_end"));
+      if (!get("id")) problems.push(`Row ${line}: order id is empty.`);
+      else if (![lat, lng, weight, vol, svc].every(Number.isFinite)) problems.push(`Row ${line}: lat, lng, weight, volume and service time must be numbers.`);
+      else if (!TIME_RE.test(t1) || !TIME_RE.test(t2)) problems.push(`Row ${line}: time windows must look like 09:30.`);
+      else orders.push({ id: get("id"), lat, lng, weight, volume: vol, tw_start: t1, tw_end: t2, service_min: svc });
+    });
+    if (problems.length) throw new Error(problems.slice(0, 4).join(" ") + (problems.length > 4 ? ` And ${problems.length - 4} more.` : ""));
+    if (orders.length > 300) throw new Error("This demo plans up to 300 orders at a time.");
+    return orders;
+  }
+
+  function loadCSVFile(file) {
+    showError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        state.orders = ordersFromCSV(String(reader.result));
+        state.result = null;
+        $("#results").innerHTML = "";
+        drawOrders(true);
+        setStatus(`${state.orders.length} orders loaded from ${file.name}. Set the depot location below if it is not in the same city.`, true);
+      } catch (e) {
+        showError(e.message);
+      }
+    };
+    reader.onerror = () => showError("The file could not be read.");
+    reader.readAsText(file);
+  }
+
+  function downloadText(name, text, type) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: type || "text/csv" }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const csvCell = (v) => (/[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+
+  // ---------- Fleet ----------
+  function renderFleet(types) {
+    $("#fleet-body").innerHTML = "";
+    (types || []).forEach((t) => addFleetRow(t));
+  }
+  function addFleetRow(t) {
+    t = t || { name: "New type", count: 1, max_weight: 1000, max_volume: 6, cost_per_km: 15, fixed_cost: 0 };
+    const tr = document.createElement("tr");
+    const cell = (f, type, extra) => `<td><input data-f="${f}" type="${type}" value="${esc(t[f])}" aria-label="${f.replace(/_/g, " ")}" ${extra || ""}></td>`;
+    tr.innerHTML =
+      cell("name", "text") + cell("count", "number", 'min="1" max="200"') + cell("max_weight", "number", 'min="1" step="any"') +
+      cell("max_volume", "number", 'min="0.1" step="any"') + cell("cost_per_km", "number", 'min="0" step="any"') + cell("fixed_cost", "number", 'min="0" step="any"') +
+      '<td><button type="button" class="icon-btn" aria-label="Remove vehicle type" title="Remove">×</button></td>';
+    tr.querySelector("button").addEventListener("click", () => {
+      if ($("#fleet-body").children.length > 1) tr.remove();
+      else showError("Keep at least one vehicle type.");
+    });
+    $("#fleet-body").appendChild(tr);
+  }
+  function readFleet() {
+    return Array.from($("#fleet-body").children).map((tr) => {
+      const v = {};
+      tr.querySelectorAll("input").forEach((i) => { v[i.dataset.f] = i.type === "number" ? parseFloat(i.value) : i.value.trim(); });
+      return v;
+    });
+  }
+
+  // ---------- Plan ----------
+  function buildRequest() {
+    const f = (id) => parseFloat($(id).value);
+    const req = {
+      depot: { lat: f("#depot-lat"), lng: f("#depot-lng") },
+      orders: state.orders,
+      vehicle_types: readFleet(),
+      shift_start: $("#shift-start").value,
+      shift_end: $("#shift-end").value,
+      max_route_min: parseInt($("#max-route").value, 10),
+      avg_speed_kmph: f("#speed"),
+      road_factor: f("#detour"),
+      time_limit_s: parseInt($("#limit").value, 10),
+      use_osrm: $("#osrm").value === "true",
+    };
+    if (!state.orders.length) throw new Error("Add some orders first: generate a sample or upload a CSV.");
+    if (!Number.isFinite(req.depot.lat) || !Number.isFinite(req.depot.lng)) throw new Error("Enter the depot latitude and longitude.");
+    if (!req.shift_start || !req.shift_end) throw new Error("Set the shift start and end times.");
+    for (const v of req.vehicle_types) {
+      if (!v.name || ![v.count, v.max_weight, v.max_volume, v.cost_per_km, v.fixed_cost].every(Number.isFinite)) throw new Error("Every vehicle type needs a name and numeric values.");
+    }
+    for (const k of ["max_route_min", "avg_speed_kmph", "road_factor", "time_limit_s"]) if (!Number.isFinite(req[k])) throw new Error("Fill in every shift and solver field.");
+    state.depot = req.depot;
+    return req;
+  }
+
+  async function plan() {
+    showError("");
+    let req;
+    try { req = buildRequest(); } catch (e) { showError(e.message); return; }
+    const btn = $("#run"), bar = $("#progress"), fill = bar.firstElementChild;
+    btn.disabled = true;
+    btn.textContent = `Planning routes (up to ${req.time_limit_s} s)`;
+    bar.classList.add("on");
+    fill.style.transition = "none"; fill.style.width = "0";
+    void fill.offsetWidth;
+    fill.style.transition = `width ${req.time_limit_s}s linear`; fill.style.width = "100%";
+    try {
+      const res = await fetch("/api/solve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
+      if (!res.ok) {
+        let msg = "The server could not plan these routes.";
+        try {
+          const body = await res.json();
+          if (typeof body.detail === "string") msg = body.detail;
+          else if (Array.isArray(body.detail) && body.detail.length) msg = body.detail.slice(0, 3).map((d) => `${(d.loc || []).slice(1).join(".")}: ${d.msg}`).join("; ");
+        } catch (_) { /* keep default message */ }
+        throw new Error(msg);
+      }
+      state.result = await res.json();
+      drawPlan(state.result);
+      renderResults(state.result);
+      $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Plan routes";
+      bar.classList.remove("on");
+    }
+  }
+
+  // ---------- Results ----------
+  function barBlock(title, fmt, opt, base, unit) {
+    const max = Math.max(opt, base, 1e-9);
+    const line = (label, v, cls) =>
+      `<div class="bar-line"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar ${cls}" style="width:${(100 * v / max).toFixed(1)}%"></div></div><span class="bar-val">${fmt(v)}${unit || ""}</span></div>`;
+    return `<div class="metric"><div class="metric-name">${title}</div>${line("Optimized", opt, "opt")}${line("Greedy dispatch", base, "")}</div>`;
+  }
+
+  function renderResults(r) {
+    const o = r.optimized.metrics, g = r.nearest_neighbour.metrics, p = r.one_trip_per_order.metrics, s = r.savings_vs_nearest_neighbour_pct;
+    const fewer = g.vehicles_used - o.vehicles_used;
+    const parts = [];
+    if (s.distance_km > 0) parts.push(`${num(s.distance_km, 0)}% less distance`);
+    if (s.cost > 0) parts.push(`${num(s.cost, 0)}% lower cost`);
+    if (fewer > 0) parts.push(`${fewer} fewer vehicle${fewer === 1 ? "" : "s"}`);
+    const headline = parts.length ? `Compared with greedy dispatch: ${parts.join(", ")}.` : "The optimized plan is no cheaper than greedy dispatch on this data.";
+    const caveat = g.unassigned > o.unassigned
+      ? `<p class="caveat">Greedy dispatch left ${g.unassigned} order${g.unassigned === 1 ? "" : "s"} undelivered, so its distance and cost are understated.</p>` : "";
+    const src = r.meta.distance_source === "osrm" ? "Road distances from OSRM." : "Distances are straight-line estimates with a road detour factor.";
+    const hours = (m) => num(m / 60, 1) + " h";
+    const cmp = (label, a, b, c) => `<tr><td>${label}</td><td class="opt">${a}</td><td>${b}</td><td>${c}</td></tr>`;
+
+    let html = `<section>
+      <h2>Plan for ${r.meta.orders} orders</h2>
+      <p class="headline">${esc(headline)}</p>${caveat}
+      ${barBlock("Distance driven", (v) => num(v, 0), o.distance_km, g.distance_km, " km")}
+      ${barBlock("Total cost", rupee, o.cost, g.cost, "")}
+      ${barBlock("Vehicles used", (v) => num(v), o.vehicles_used, g.vehicles_used, "")}
+    </section>
+    <section>
+      <h2>Side by side</h2>
+      <table class="compare"><thead><tr><th></th><th>Optimized</th><th>Greedy dispatch</th><th>One trip per order</th></tr></thead><tbody>
+        ${cmp("Distance", num(o.distance_km, 0) + " km", num(g.distance_km, 0) + " km", num(p.distance_km, 0) + " km")}
+        ${cmp("Cost", rupee(o.cost), rupee(g.cost), rupee(p.cost))}
+        ${cmp("Vehicles", o.vehicles_used, g.vehicles_used, p.vehicles_used + " trips")}
+        ${cmp("Weight capacity used", num(o.avg_util_weight, 0) + "%", num(g.avg_util_weight, 0) + "%", num(p.avg_util_weight, 0) + "%")}
+        ${cmp("Volume capacity used", num(o.avg_util_volume, 0) + "%", num(g.avg_util_volume, 0) + "%", num(p.avg_util_volume, 0) + "%")}
+        ${cmp("Orders delivered", `${o.served} of ${o.total_orders}`, `${g.served} of ${g.total_orders}`, `${p.served} of ${p.total_orders}`)}
+        ${cmp("Delivered on time", num(o.on_time_pct, 0) + "%", num(g.on_time_pct, 0) + "%", num(p.on_time_pct, 0) + "%")}
+        ${cmp("Driver waiting", hours(o.wait_min_total), hours(g.wait_min_total), hours(p.wait_min_total))}
+      </tbody></table>
+      <p class="note">Greedy dispatch fills the biggest vehicles first and always drives to the nearest order that still fits and can be delivered inside its window. One trip per order sends a vehicle out for each order on its own. ${esc(src)} Solved in ${num(o.solve_time_s, 1)} s.</p>
+    </section>
+    <section>
+      <h2>Routes (${r.optimized.routes.length})</h2>
+      <div id="route-list"></div>
+      <div class="actions"><button id="dl-plan" type="button">Download plan as CSV</button></div>
+      <p class="note">Open a route to see it on the map. Lines connect the stops in order; they are not road geometry.</p>
+    </section>`;
+
+    if (r.optimized.unassigned.length) {
+      html += `<section class="unassigned"><h2>Not delivered (${r.optimized.unassigned.length})</h2><ul class="plain">` +
+        r.optimized.unassigned.map((u) => `<li><strong>${esc(u.order_id)}</strong>: ${esc(u.reason)}</li>`).join("") + "</ul></section>";
+    }
+    $("#results").innerHTML = html;
+
+    const list = $("#route-list");
+    r.optimized.routes.forEach((rt, i) => {
+      const d = document.createElement("details");
+      d.className = "route";
+      d.innerHTML = `<summary><span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span><span><span class="route-name">${esc(rt.vehicle)}</span><br>
+        <span class="route-meta">${rt.stops.length} stops, ${num(rt.distance_km, 0)} km, ${num(rt.util_weight, 0)}% of weight capacity, out ${esc(rt.depart)}, back ${esc(rt.return)}</span></span></summary>
+        <table class="stops"><thead><tr><th>Stop</th><th>Order</th><th>Arrive</th><th>Window</th><th>Wait</th></tr></thead><tbody>
+        ${rt.stops.map((s, k) => `<tr><td>${k + 1}</td><td>${esc(s.order_id)}</td><td>${esc(s.arrival)}</td><td>${esc(s.window)}</td><td class="${s.late_min ? "late" : ""}">${s.late_min ? "late " + s.late_min : s.wait_min} min</td></tr>`).join("")}
+        </tbody></table>`;
+      d.querySelector("summary").addEventListener("click", () => {
+        if (!d.open) {
+          list.querySelectorAll("details[open]").forEach((x) => { if (x !== d) x.open = false; });
+          selectRoute(i);
+        } else clearSelection();
+      });
+      list.appendChild(d);
+    });
+
+    $("#dl-plan").addEventListener("click", () => {
+      const lines = ["vehicle,stop,order_id,arrival,service_start,window,wait_min,weight_kg"];
+      r.optimized.routes.forEach((rt) => rt.stops.forEach((s, k) =>
+        lines.push([rt.vehicle, k + 1, s.order_id, s.arrival, s.service_start, s.window, s.wait_min, s.weight].map(csvCell).join(","))));
+      downloadText("route-plan.csv", lines.join("\n") + "\n");
+    });
+  }
+
+  // ---------- Wiring ----------
+  async function init() {
+    $("#gen").addEventListener("click", generate);
+    $("#run").addEventListener("click", plan);
+    $("#add-type").addEventListener("click", () => addFleetRow());
+    $("#csv").addEventListener("change", (e) => { if (e.target.files[0]) loadCSVFile(e.target.files[0]); e.target.value = ""; });
+    $("#dl-sample").addEventListener("click", () => {
+      if (!state.orders.length) return;
+      const lines = ["order_id,lat,lng,weight,volume,time_window_start,time_window_end,service_time"].concat(
+        state.orders.map((o) => [o.id, o.lat, o.lng, o.weight, o.volume, o.tw_start, o.tw_end, o.service_min].map(csvCell).join(",")));
+      downloadText("orders.csv", lines.join("\n") + "\n");
+    });
+    $("#center-depot").addEventListener("click", () => {
+      if (!state.orders.length) return;
+      const lat = state.orders.reduce((a, o) => a + o.lat, 0) / state.orders.length;
+      const lng = state.orders.reduce((a, o) => a + o.lng, 0) / state.orders.length;
+      $("#depot-lat").value = lat.toFixed(6); $("#depot-lng").value = lng.toFixed(6);
+      state.depot = { lat, lng };
+      drawOrders(false);
+    });
+    ["#depot-lat", "#depot-lng"].forEach((id) => $(id).addEventListener("change", () => {
+      const lat = parseFloat($("#depot-lat").value), lng = parseFloat($("#depot-lng").value);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) { state.depot = { lat, lng }; if (!state.result) drawOrders(false); }
+    }));
+    try {
+      const cities = await (await fetch("/api/cities")).json();
+      const label = (c) => c.charAt(0).toUpperCase() + c.slice(1);
+      $("#city").innerHTML = cities.map((c) => `<option value="${esc(c)}">${esc(label(c))}</option>`).join("");
+      if (cities.includes("bengaluru")) $("#city").value = "bengaluru";
+      await generate();
+    } catch (e) {
+      showError("Could not reach the server to load sample data. Upload a CSV instead, or reload.");
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Render Blueprint: New > Blueprint > pick this repo. Free plan sleeps after ~15 min idle.
+services:
+  - type: web
+    name: route-optimizer
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: MAX_TIME_LIMIT      # cap on solver seconds per request
+        value: "20"
+      - key: MAX_CONCURRENT_SOLVES
+        value: "1"
