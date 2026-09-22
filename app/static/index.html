@@ -182,7 +182,7 @@
         <div class="row two">
           <div><label for="limit">Search time (seconds)</label><input id="limit" type="number" min="1" max="60" value="10"></div>
           <div><label for="osrm">Distances</label>
-            <select id="osrm"><option value="false">Straight line with detour factor</option><option value="true">Real roads (OSRM, if the server has it)</option></select>
+            <select id="osrm"><option value="true">Real roads (OSRM)</option><option value="false">Straight line with detour factor</option></select>
           </div>
         </div>
         <p class="note">Longer search rarely changes small plans but can improve plans with more than 150 orders.</p>
@@ -255,8 +255,8 @@
     const all = [depot];
     result.optimized.routes.forEach((r, i) => {
       const color = COLORS[i % COLORS.length];
-      const path = [depot].concat(r.stops.map((s) => [s.lat, s.lng]), [depot]);
-      const line = L.polyline(path, { color, weight: 3.5, opacity: 0.85 }).addTo(planLayer);
+      const path = r.geometry && r.geometry.length ? r.geometry : [depot].concat(r.stops.map((s) => [s.lat, s.lng]), [depot]);
+      const line = L.polyline(path, { color, weight: r.geometry ? 4 : 3, opacity: 0.85, dashArray: r.geometry ? null : "2 6" }).addTo(planLayer);
       const markers = r.stops.map((s, k) => {
         all.push([s.lat, s.lng]);
         return L.marker([s.lat, s.lng], {
@@ -531,6 +531,11 @@
     const caveat = g.unassigned > o.unassigned
       ? `<p class="caveat">Greedy dispatch left ${g.unassigned} order${g.unassigned === 1 ? "" : "s"} undelivered, so its distance and cost are understated.</p>` : "";
     const src = r.meta.distance_source === "osrm" ? "Road distances from OSRM." : "Distances are straight-line estimates with a road detour factor.";
+    const mapNote = r.meta.road_geometry
+      ? "Lines on the map follow real roads (OSRM)."
+      : (r.meta.distance_source === "osrm"
+          ? "Distances used real roads, but road-following lines were not available for the map, so routes are drawn as straight lines between stops (dashed)."
+          : "Lines on the map are straight, not road geometry; switch \u201cDistances\u201d to real roads for road-following lines.");
     const hours = (m) => num(m / 60, 1) + " h";
     const cmp = (label, a, b, c) => `<tr><td>${label}</td><td class="opt">${a}</td><td>${b}</td><td>${c}</td></tr>`;
 
@@ -559,7 +564,7 @@
       <h2>Routes (${r.optimized.routes.length})</h2>
       <div id="route-list"></div>
       <div class="actions"><button id="dl-plan" type="button">Download plan as CSV</button></div>
-      <p class="note">Open a route to see it on the map. Lines connect the stops in order; they are not road geometry.</p>
+      <p class="note">Open a route to see it on the map. ${esc(mapNote)}</p>
     </section>`;
 
     if (r.optimized.unassigned.length) {

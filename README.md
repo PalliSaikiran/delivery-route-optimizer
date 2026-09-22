@@ -115,11 +115,11 @@ The free plan sleeps after about 15 minutes idle, so the first request afterward
 |---|---|---|
 | `MAX_TIME_LIMIT` | `30` | Upper bound on solver seconds per request |
 | `MAX_CONCURRENT_SOLVES` | `2` | Simultaneous solves; extra requests get a 429 instead of overloading the host |
-| `OSRM_URL` | empty | Set to an OSRM server (for example `https://router.project-osrm.org`, demo use only) to use real road distances and times when the UI option is on. Falls back to straight-line estimates if it fails or there are more than 100 points |
+| `OSRM_URL` | `https://router.project-osrm.org` | OSRM server used for road distances, travel times, and the road-following lines drawn on the map, when "Distances" is set to "Real roads" (the default). This is OSRM's public demo server — fine for a portfolio project, not for production traffic. Falls back automatically to straight-line estimates (dashed on the map) if it's unreachable, rate-limited, or there are more than 100 points |
 
 ## Limits and honest caveats
 
-- **Distances are estimates by default.** Straight-line distance times a detour factor (1.3), with a fixed average speed. Use OSRM for road distances. The map draws straight lines between stops, not road geometry.
+- **Real roads by default, with a fallback.** The UI defaults to OSRM for both distances and the lines drawn on the map, so routes follow streets instead of cutting through buildings. If OSRM can't be reached (offline, rate-limited, more than 100 points), it falls back to straight-line distance times a detour factor (1.3) with a fixed average speed, and the map draws dashed straight lines between stops so it's clear they aren't road geometry.
 - **Synthetic data.** Orders are generated, not real. The generator draws weights, volumes and windows from simple distributions.
 - **Time-limited search.** Guided Local Search finds good, not provably optimal, plans. The gap to optimal is unknown.
 - **Single depot, single trip per vehicle per day.** Multi-depot, multi-trip and pickup-and-delivery are not modelled.

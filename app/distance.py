@@ -44,6 +44,25 @@ def _osrm_matrices(coords, base_url):
     return dist_m, time_min
 
 
+def route_geometry(coords: List[Tuple[float, float]], base_url: str) -> List[Tuple[float, float]]:
+    """Road-following path visiting coords in order (depot, stop, stop, ..., depot), via OSRM /route.
+    Returns a list of (lat, lng) points, or [] if OSRM can't be reached or the route fails."""
+    if len(coords) < 2:
+        return []
+    path = ";".join(f"{lng:.6f},{lat:.6f}" for lat, lng in coords)
+    url = f"{base_url.rstrip('/')}/route/v1/driving/{path}?overview=full&geometries=geojson"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.load(resp)
+        if data.get("code") != "Ok" or not data.get("routes"):
+            return []
+        # GeoJSON is [lng, lat]; flip to (lat, lng) for the map.
+        return [(lat, lng) for lng, lat in data["routes"][0]["geometry"]["coordinates"]]
+    except Exception as exc:  # network, quota, bad response: caller falls back to a straight line
+        log.warning("OSRM route geometry unavailable (%s)", exc)
+        return []
+
+
 def build_matrices(
     coords: List[Tuple[float, float]],
     avg_speed_kmph: float,

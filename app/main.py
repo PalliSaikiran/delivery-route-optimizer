@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -11,12 +12,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .baseline import nearest_neighbour, one_trip_per_order
 from .data_gen import CITIES, generate
+from .distance import route_geometry
 from .model import build_problem
 from .schemas import SolveRequest
 from .solver import solve_vrp
 
 MAX_TIME_LIMIT = int(os.getenv("MAX_TIME_LIMIT", "30"))  # seconds; protects small hosts
-OSRM_URL = os.getenv("OSRM_URL", "")                      # e.g. https://router.project-osrm.org (demo use only)
+OSRM_URL = os.getenv("OSRM_URL", "https://router.project-osrm.org")  # public demo server; light use only, no SLA
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Delivery Route Optimizer", version="1.0.0")
@@ -53,6 +55,19 @@ def solve(req: SolveRequest):
     finally:
         _slots.release()
 
+    road_geometry = False
+    if req.use_osrm and OSRM_URL and optimized["routes"]:
+        depot = (req.depot.lat, req.depot.lng)
+        route_coords = [
+            [depot] + [(s["lat"], s["lng"]) for s in r["stops"]] + [depot] for r in optimized["routes"]
+        ]
+        with ThreadPoolExecutor(max_workers=min(8, len(route_coords))) as pool:
+            geometries = list(pool.map(lambda c: route_geometry(c, OSRM_URL), route_coords))
+        for r, geom in zip(optimized["routes"], geometries):
+            if geom:
+                r["geometry"] = geom  # list of [lat, lng]; frontend draws a straight line if this is absent
+        road_geometry = any(geom for geom in geometries)
+
     o, b = optimized["metrics"], nn["metrics"]
 
     def saving(key):
@@ -61,6 +76,7 @@ def solve(req: SolveRequest):
     return {
         "meta": {
             "distance_source": problem.distance_source,
+            "road_geometry": road_geometry,
             "time_limit_s": limit,
             "orders": problem.n_orders,
             "vehicles_available": len(problem.vehicles),
